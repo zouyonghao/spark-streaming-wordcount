@@ -85,3 +85,45 @@ ssc.start()
 
 #### 任务3 :exit 退出流处理程序
 
+因为 `ssc.stop()` 必须在 driver 端执行，因此我们可以使用一个 `Accumulator` 来标识是否需要停止。如果收到停止指令，令该 `Accumulator` 加1，driver 端判断累加器的值，如果大于零则停止。代码如下：
+
+```scala
+object SimpleApp {
+  def main(args: Array[String]) {
+    val sparkConf = new SparkConf().setAppName("wordcount1")
+    val sc = new SparkContext(sparkConf)
+    val ssc = new StreamingContext(sc, Seconds(5))
+    val lines = ssc.socketTextStream("thumm01", 54321)
+    val wordAccumulator = new CollectionAccumulator[String]()
+    val shutdownAccumulator = new LongAccumulator()
+    ssc.sparkContext.register(wordAccumulator, "words")
+    ssc.sparkContext.register(shutdownAccumulator, "shutdownAccumulator")
+
+    lines.foreachRDD { line =>
+      println(line)
+      line.flatMap(l => l.split(" "))
+        .foreach(i => {
+          wordAccumulator.add(i)
+          if (i == ":exit") {
+            shutdownAccumulator.add(1)
+          }
+        })
+      println(
+        wordAccumulator.value.toArray
+          .groupBy(w => w)
+          .map(w => (w._1, w._2.size))
+      )
+      if (shutdownAccumulator.value > 0) {
+        ssc.stop()
+        println("Application stopped!")
+      }
+    }
+    ssc.start()
+    ssc.awaitTermination()
+  }
+}
+```
+
+效果如下：
+
+![](5.png)

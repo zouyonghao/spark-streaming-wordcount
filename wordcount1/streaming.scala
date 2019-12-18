@@ -13,24 +13,36 @@ object SimpleApp {
     val ssc = new StreamingContext(sc, Seconds(5))
     val lines = ssc.socketTextStream("thumm01", 54321)
     val wordAccumulator = new CollectionAccumulator[String]()
+    val shutdownAccumulator = new LongAccumulator()
     ssc.sparkContext.register(wordAccumulator, "words")
+    ssc.sparkContext.register(shutdownAccumulator, "shutdownAccumulator")
+
     // val wordAccumulator = ssc.sparkContext.collectionAccumulator[String]("words")
     // ssc.checkpoint(".")
+
     lines.foreachRDD { line =>
-    // rdd.foreach { line =>
-    // lines
+      // rdd.foreach { line =>
+      // lines
       println(line)
-      line.flatMap(l => l.split(" "))
-      .foreach(i => {
-        wordAccumulator.add(i)
-        println(wordAccumulator.value)
-        Logger
-          .getLogger(this.getClass())
-          .error(i + " " + wordAccumulator.value.toArray.filter(_ == i).size)
-        // (i, wordAccumulator.value.toArray.filter(_ == i).size)
-      })
+      line
+        .flatMap(l => l.split(" "))
+        .foreach(i => {
+          wordAccumulator.add(i)
+          // for exit
+          if (i == ":exit") {
+            shutdownAccumulator.add(1)
+          }
+        })
       // this works, accumulator should be used in driver side!
-      println(wordAccumulator.value.toArray.groupBy(w => w).map(w => (w._1, w._2.size)))
+      println(
+        wordAccumulator.value.toArray
+          .groupBy(w => w)
+          .map(w => (w._1, w._2.size))
+      )
+      if (shutdownAccumulator.value > 0) {
+        ssc.stop()
+        println("Application stopped!")
+      }
       // .reduceByKey(_ + _)
 
     }

@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <title>大数据系统基础</title>
+        
+        <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/Microsoft/vscode/extensions/markdown-language-features/media/markdown.css">
+        <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/Microsoft/vscode/extensions/markdown-language-features/media/highlight.css">
+        
+        <style>
+.task-list-item { list-style-type: none; } .task-list-item-checkbox { margin-left: -20px; vertical-align: middle; }
+</style>
+        <style>
+            body {
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe WPC', 'Segoe UI', 'Ubuntu', 'Droid Sans', sans-serif;
+                font-size: 14px;
+                line-height: 1.6;
+            }
+        </style>
+        
+        
+    </head>
+    <body class="vscode-light">
+        <h1 id="%e5%a4%a7%e6%95%b0%e6%8d%ae%e7%b3%bb%e7%bb%9f%e5%9f%ba%e7%a1%80">大数据系统基础</h1>
+<h2 id="%e5%ae%9e%e9%aa%8c%e5%9b%9b-spark-streaming">实验四： Spark Streaming</h2>
+<h3 id="%e9%82%b9%e6%b0%b8%e6%b5%a9-2019211168">邹永浩 2019211168</h3>
+<h4 id="%e4%bb%bb%e5%8a%a11-spark-streaming-%e8%af%8d%e9%a2%91%e7%bb%9f%e8%ae%a1">任务1 Spark Streaming 词频统计</h4>
+<p>使用的代码如下：</p>
+<pre><code class="language-scala"><div><span class="hljs-keyword">import</span> org.apache.spark.streaming._
+<span class="hljs-keyword">val</span> ssc = <span class="hljs-keyword">new</span> <span class="hljs-type">StreamingContext</span>(sc, <span class="hljs-type">Seconds</span>(<span class="hljs-number">5</span>))
+<span class="hljs-keyword">val</span> lines = ssc.socketTextStream(<span class="hljs-string">"thumm01"</span>, <span class="hljs-number">54321</span>)
+<span class="hljs-keyword">val</span> result = lines.flatMap(_.split(<span class="hljs-string">" "</span>)).map(w =&gt; (w, <span class="hljs-number">1</span>)).reduceByKey(_ + _)
+result.print()
+ssc.start()
+</div></code></pre>
+<p>分别启动 <code>nc</code> 和 <code>spark-shell</code></p>
+<p><img src="file:///c:\Users\1\Desktop\sprak-streaming-wordcount\1.png" alt=""></p>
+<p>此时统计效果为统计5秒内的词频</p>
+<p><img src="file:///c:\Users\1\Desktop\sprak-streaming-wordcount\2.png" alt=""></p>
+<h4 id="%e4%bb%bb%e5%8a%a12-%e7%b4%af%e5%8a%a0%e8%af%8d%e9%a2%91%e7%bb%9f%e8%ae%a1">任务2 累加词频统计</h4>
+<p>若要支持累加词频统计，有很多方法，最简单的为使用 <code>CollectionAccumulator</code></p>
+<pre><code class="language-scala"><div><span class="hljs-class"><span class="hljs-keyword">object</span> <span class="hljs-title">SimpleApp</span> </span>{
+  <span class="hljs-function"><span class="hljs-keyword">def</span> <span class="hljs-title">main</span></span>(args: <span class="hljs-type">Array</span>[<span class="hljs-type">String</span>]) {
+    <span class="hljs-keyword">val</span> sparkConf = <span class="hljs-keyword">new</span> <span class="hljs-type">SparkConf</span>()
+      .setAppName(<span class="hljs-string">"wordcount1"</span>)
+    <span class="hljs-keyword">val</span> sc = <span class="hljs-keyword">new</span> <span class="hljs-type">SparkContext</span>(sparkConf)
+    <span class="hljs-keyword">val</span> ssc = <span class="hljs-keyword">new</span> <span class="hljs-type">StreamingContext</span>(sc, <span class="hljs-type">Seconds</span>(<span class="hljs-number">5</span>))
+    <span class="hljs-keyword">val</span> lines = ssc.socketTextStream(<span class="hljs-string">"thumm01"</span>, <span class="hljs-number">54321</span>)
+    <span class="hljs-keyword">val</span> wordAccumulator = <span class="hljs-keyword">new</span> <span class="hljs-type">CollectionAccumulator</span>[<span class="hljs-type">String</span>]()
+    ssc.sparkContext.register(wordAccumulator, <span class="hljs-string">"words"</span>)
+
+    lines.foreachRDD { line =&gt;
+      line.flatMap(l =&gt; l.split(<span class="hljs-string">" "</span>))
+      .foreach(i =&gt; {
+        wordAccumulator.add(i)
+      })
+      println(wordAccumulator.value.toArray
+            .groupBy(w =&gt; w).map(w =&gt; (w._1, w._2.size)))
+    }
+    ssc.start()
+    ssc.awaitTermination()
+  }
+}
+</div></code></pre>
+<p>这里要使用 <code>sbt</code> 工具打包后使用 <code>spark-submit</code>提交任务，根据我的测试，在<code>spark-shell</code>中使用 <code>Accumulator</code> 和广播变量，会出现无法序列化的错误。</p>
+<p>任务提交后，在 driver 端就可以看到累加器的值</p>
+<p><img src="file:///c:\Users\1\Desktop\sprak-streaming-wordcount\3.png" alt=""></p>
+<p>还有一种方法为官网使用<code>StateDStream</code>的例子，如下：</p>
+<pre><code class="language-scala"><div><span class="hljs-keyword">import</span> org.apache.spark.streaming._
+<span class="hljs-keyword">val</span> updateFunc = (values: <span class="hljs-type">Seq</span>[<span class="hljs-type">Int</span>], state: <span class="hljs-type">Option</span>[<span class="hljs-type">Int</span>]) =&gt; {
+  <span class="hljs-keyword">val</span> currentCount = values.foldLeft(<span class="hljs-number">0</span>)(_ + _)
+  <span class="hljs-keyword">val</span> previousCount = state.getOrElse(<span class="hljs-number">0</span>)
+  <span class="hljs-type">Some</span>(currentCount + previousCount)
+}
+
+<span class="hljs-keyword">val</span> ssc = <span class="hljs-keyword">new</span> <span class="hljs-type">StreamingContext</span>(sc, <span class="hljs-type">Seconds</span>(<span class="hljs-number">5</span>))
+ssc.checkpoint(<span class="hljs-string">"."</span>)
+<span class="hljs-keyword">val</span> lines = ssc.socketTextStream(<span class="hljs-string">"thumm01"</span>, <span class="hljs-number">54321</span>)
+<span class="hljs-keyword">val</span> words = lines.flatMap(_.split(<span class="hljs-string">" "</span>))
+<span class="hljs-keyword">val</span> wordDstream = words.map(x =&gt; (x, <span class="hljs-number">1</span>))
+<span class="hljs-keyword">val</span> stateDstream = wordDstream.updateStateByKey[<span class="hljs-type">Int</span>](updateFunc)
+stateDstream.print()
+ssc.start()
+</div></code></pre>
+<p>这种方法也可实现同样效果</p>
+<p><img src="file:///c:\Users\1\Desktop\sprak-streaming-wordcount\4.png" alt=""></p>
+<h4 id="%e4%bb%bb%e5%8a%a13-exit-%e9%80%80%e5%87%ba%e6%b5%81%e5%a4%84%e7%90%86%e7%a8%8b%e5%ba%8f">任务3 :exit 退出流处理程序</h4>
+<p>因为 <code>ssc.stop()</code> 必须在 driver 端执行，因此我们可以使用一个 <code>Accumulator</code> 来标识是否需要停止。如果收到停止指令，令该 <code>Accumulator</code> 加1，driver 端判断累加器的值，如果大于零则停止。代码如下：</p>
+<pre><code class="language-scala"><div><span class="hljs-class"><span class="hljs-keyword">object</span> <span class="hljs-title">SimpleApp</span> </span>{
+  <span class="hljs-function"><span class="hljs-keyword">def</span> <span class="hljs-title">main</span></span>(args: <span class="hljs-type">Array</span>[<span class="hljs-type">String</span>]) {
+    <span class="hljs-keyword">val</span> sparkConf = <span class="hljs-keyword">new</span> <span class="hljs-type">SparkConf</span>().setAppName(<span class="hljs-string">"wordcount1"</span>)
+    <span class="hljs-keyword">val</span> sc = <span class="hljs-keyword">new</span> <span class="hljs-type">SparkContext</span>(sparkConf)
+    <span class="hljs-keyword">val</span> ssc = <span class="hljs-keyword">new</span> <span class="hljs-type">StreamingContext</span>(sc, <span class="hljs-type">Seconds</span>(<span class="hljs-number">5</span>))
+    <span class="hljs-keyword">val</span> lines = ssc.socketTextStream(<span class="hljs-string">"thumm01"</span>, <span class="hljs-number">54321</span>)
+    <span class="hljs-keyword">val</span> wordAccumulator = <span class="hljs-keyword">new</span> <span class="hljs-type">CollectionAccumulator</span>[<span class="hljs-type">String</span>]()
+    <span class="hljs-keyword">val</span> shutdownAccumulator = <span class="hljs-keyword">new</span> <span class="hljs-type">LongAccumulator</span>()
+    ssc.sparkContext.register(wordAccumulator, <span class="hljs-string">"words"</span>)
+    ssc.sparkContext.register(shutdownAccumulator, <span class="hljs-string">"shutdownAccumulator"</span>)
+
+    lines.foreachRDD { line =&gt;
+      println(line)
+      line.flatMap(l =&gt; l.split(<span class="hljs-string">" "</span>))
+        .foreach(i =&gt; {
+          wordAccumulator.add(i)
+          <span class="hljs-keyword">if</span> (i == <span class="hljs-string">":exit"</span>) {
+            shutdownAccumulator.add(<span class="hljs-number">1</span>)
+          }
+        })
+      println(
+        wordAccumulator.value.toArray
+          .groupBy(w =&gt; w)
+          .map(w =&gt; (w._1, w._2.size))
+      )
+      <span class="hljs-keyword">if</span> (shutdownAccumulator.value &gt; <span class="hljs-number">0</span>) {
+        ssc.stop()
+        println(<span class="hljs-string">"Application stopped!"</span>)
+      }
+    }
+    ssc.start()
+    ssc.awaitTermination()
+  }
+}
+</div></code></pre>
+<p>效果如下：</p>
+<p><img src="file:///c:\Users\1\Desktop\sprak-streaming-wordcount\5.png" alt=""></p>
+
+    </body>
+    </html>
